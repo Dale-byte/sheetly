@@ -5,19 +5,6 @@ const CONSTANTS = {
   SCHEMA_VERSION: 1
 };
 
-// One-time migration: carry over data saved under the legacy BudgetBuddy key.
-(function () {
-  try {
-    if (localStorage.getItem('sheetly_data') == null) {
-      var legacy = localStorage.getItem('budgetbuddy_data');
-      if (legacy != null) {
-        localStorage.setItem('sheetly_data', legacy);
-        try { localStorage.removeItem('budgetbuddy_data'); } catch (e) {}
-      }
-    }
-  } catch (e) {}
-})();
-
 const generateId = () => {
   try {
     return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -2945,10 +2932,10 @@ window.importData = importData;
 window.resetAllData = resetAllData;
 window.updateSetting = updateSetting;
 window.openBackupsTab = function() {
-  try { window.parent.postMessage({ source: 'sheetly', type: 'open-backups' }, '*'); } catch (e) {}
+  try { window.parent.postMessage({ source: 'sheetly', type: 'open-backups' }, window.location.origin); } catch (e) {}
 };
 window.openTemplatesTab = function() {
-  try { window.parent.postMessage({ source: 'sheetly', type: 'open-templates' }, '*'); } catch (e) {}
+  try { window.parent.postMessage({ source: 'sheetly', type: 'open-templates' }, window.location.origin); } catch (e) {}
   navigate('templates');
 };
 window.hideModal = hideModal;

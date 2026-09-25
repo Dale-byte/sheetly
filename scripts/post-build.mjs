@@ -38,7 +38,7 @@ const from = "dist/index.html";
 const to = "dist/404.html";
 
 if (!existsSync(from)) {
-  console.error(`postbuild: ${from} not found - run vite build first`);
+  console.error(`post-build: ${from} not found - run vite build first`);
   process.exit(1);
 }
 
@@ -52,7 +52,7 @@ copyFileSync(from, to);
 // stale assets after every release.
 const swPath = join(dist, "sw.js");
 if (!existsSync(swPath)) {
-  console.error(`postbuild: ${swPath} not found - run vite build first`);
+  console.error(`post-build: ${swPath} not found - run vite build first`);
   process.exit(1);
 }
 
@@ -72,5 +72,5 @@ sw = sw.replace(
 );
 writeFileSync(swPath, sw);
 
-console.log(`postbuild: copied ${from} -> ${to}`);
-console.log(`postbuild: stamped sw.js (version ${VERSION}, ${precache.length} precache entries)`);
+console.log(`post-build: copied ${from} -> ${to}`);
+console.log(`post-build: stamped sw.js (version ${VERSION}, ${precache.length} precache entries)`);

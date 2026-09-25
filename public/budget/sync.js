@@ -11,15 +11,22 @@
   var deferredDCL = [];
   var initReceived = false;
 
+  // Opened directly (no host frame), e.g. /sheetly/budget/index.html in a tab.
+  // Nothing will ever send us an init, so deferring boot would leave the page
+  // blank forever. Run normally instead.
+  var framed = window.parent && window.parent !== window;
+
   // Intercept DOMContentLoaded so app.js's init waits for our snapshot.
-  var origAdd = document.addEventListener.bind(document);
-  document.addEventListener = function (type, listener, opts) {
-    if (type === 'DOMContentLoaded' && !initReceived) {
-      deferredDCL.push(listener);
-      return;
-    }
-    return origAdd(type, listener, opts);
-  };
+  if (framed) {
+    var origAdd = document.addEventListener.bind(document);
+    document.addEventListener = function (type, listener, opts) {
+      if (type === 'DOMContentLoaded' && !initReceived) {
+        deferredDCL.push(listener);
+        return;
+      }
+      return origAdd(type, listener, opts);
+    };
+  }
 
   function fireDeferred() {
     initReceived = true;
@@ -32,7 +39,12 @@
 
   function send(type, payload) {
     try {
-      window.parent.postMessage({ source: 'sheetly', type: type, payload: payload }, '*');
+      // Never '*': that hands the budget snapshot to whatever parent we are
+      // framed by. The host is always same-origin (it serves this file).
+      window.parent.postMessage(
+        { source: 'sheetly', type: type, payload: payload },
+        window.location.origin
+      );
     } catch (e) {}
   }
 
@@ -61,6 +73,11 @@
 
   // Receive snapshot/auth state from parent.
   window.addEventListener('message', function (e) {
+    // Security: only accept messages from our host, same-origin.
+    // `msg.source` below is NOT this check - that string lives inside e.data
+    // and any page can forge it. These two are the real gate.
+    if (e.origin !== window.location.origin) return;
+    if (e.source !== window.parent) return;
     var msg = e.data;
     if (!msg || msg.source !== 'sheetly-host') return;
     if (msg.type === 'init') {
@@ -86,5 +103,9 @@
   });
 
   // Tell parent we're alive and ready to receive snapshot.
-  send('hello', null);
+  // Standalone: no parent, so no handshake and no pushes (ready stays false,
+  // which keeps the setItem hook from posting into the void).
+  if (framed) {
+    send('hello', null);
+  }
 })();

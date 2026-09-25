@@ -13,11 +13,11 @@ import {
 import { Backups } from "@/components/Backups";
 import { InstallPrompt } from "@/components/InstallPrompt";
 
-// The budget app stores under the same-origin localStorage keys below. Read as
+// The budget app stores under the same-origin localStorage key below. Read as
 // a fallback so an empty cloud can never wipe a device that has local data.
 function localBudgetData(): string {
   try {
-    return localStorage.getItem("sheetly_data") || localStorage.getItem("budgetbuddy_data") || "";
+    return localStorage.getItem("sheetly_data") || "";
   } catch {
     return "";
   }
@@ -254,7 +254,10 @@ function BudgetFrame({ cfg, onDisconnect }: { cfg: GitHubConfig; onDisconnect: (
   // Handle messages from the iframe (init / save) and write back to GitHub.
   useEffect(() => {
     function send(type: string, payload: unknown) {
-      iframeRef.current?.contentWindow?.postMessage({ source: "sheetly-host", type, payload }, "*");
+      iframeRef.current?.contentWindow?.postMessage(
+        { source: "sheetly-host", type, payload },
+        window.location.origin,
+      );
     }
 
     let chain: Promise<unknown> = Promise.resolve();
@@ -295,6 +298,13 @@ function BudgetFrame({ cfg, onDisconnect }: { cfg: GitHubConfig; onDisconnect: (
     }
 
     function onMsg(e: MessageEvent) {
+      // Security: only accept messages from our own iframe, same-origin.
+      // `msg.source` below is NOT this check - that string lives inside e.data
+      // and any page can forge it. Without these two lines any site can frame
+      // this app and post a forged "save", which writes to the user's private
+      // GitHub repo using their stored token.
+      if (e.origin !== window.location.origin) return;
+      if (e.source !== iframeRef.current?.contentWindow) return;
       const msg = e.data;
       if (!msg || msg.source !== "sheetly") return;
       if (msg.type === "hello") {
@@ -348,7 +358,7 @@ function BudgetFrame({ cfg, onDisconnect }: { cfg: GitHubConfig; onDisconnect: (
       snapshotRef.current = incoming;
       iframeRef.current?.contentWindow?.postMessage(
         { source: "sheetly-host", type: "reload" },
-        "*",
+        window.location.origin,
       );
     }
     const id = setInterval(check, 30000);
@@ -367,7 +377,7 @@ function BudgetFrame({ cfg, onDisconnect }: { cfg: GitHubConfig; onDisconnect: (
   function navigateIframe(view: string) {
     iframeRef.current?.contentWindow?.postMessage(
       { source: "sheetly-host", type: "navigate", payload: view },
-      "*",
+      window.location.origin,
     );
   }
 
@@ -379,7 +389,7 @@ function BudgetFrame({ cfg, onDisconnect }: { cfg: GitHubConfig; onDisconnect: (
         lastSentRef.current = incoming;
         iframeRef.current?.contentWindow?.postMessage(
           { source: "sheetly-host", type: "reload" },
-          "*",
+          window.location.origin,
         );
       })
       .catch(() => {});
@@ -388,6 +398,9 @@ function BudgetFrame({ cfg, onDisconnect }: { cfg: GitHubConfig; onDisconnect: (
   // Allow the iframe (Settings view) to request switching to the Backups tab.
   useEffect(() => {
     function onMsg(e: MessageEvent) {
+      // Same-origin + from-our-iframe checks, as in the handler above.
+      if (e.origin !== window.location.origin) return;
+      if (e.source !== iframeRef.current?.contentWindow) return;
       const msg = e.data;
       if (msg && msg.source === "sheetly" && msg.type === "open-backups") {
         setTab("backups");

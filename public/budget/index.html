@@ -5,6 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sheetly</title>
   <link rel="stylesheet" href="styles.css?v=mob-7">
+  <script>
+    // Refuse to be framed by another origin. The Sheetly shell frames this
+    // page same-origin (window.top !== window.self but same origin), so that
+    // still works; only a cross-origin parent is bounced. See the note in
+    // ../../index.html - GitHub Pages cannot send X-Frame-Options, so this is
+    // the only clickjacking defence available.
+    try {
+      if (window.top !== window.self && window.top.location.origin !== window.location.origin) {
+        window.top.location = window.self.location;
+      }
+    } catch (e) {
+      // Cross-origin parent: its location is unreadable, which is itself proof
+      // we are framed by a stranger. Break out.
+      window.top.location = window.self.location;
+    }
+  </script>
 </head>
 <body>
   <div class="app-container">
