@@ -16,16 +16,27 @@ stored only in your browser.
 
 ## Commands
 
-| Command           | What it does                               |
-| ----------------- | ------------------------------------------ |
-| `npm run dev`     | Dev server with HMR                        |
-| `npm run build`   | Production build + `scripts/postbuild.mjs` |
-| `npm run preview` | Serve the built output from `dist/`        |
-| `npm run lint`    | ESLint                                     |
-| `npm run format`  | Rewrite files with Prettier                |
+| Command                | What it does                                      |
+| ---------------------- | ------------------------------------------------- |
+| `npm run dev`          | Dev server with HMR                               |
+| `npm run build`        | Production build + `scripts/postbuild.mjs`        |
+| `npm run preview`      | Serve the built output from `dist/`               |
+| `npm run lint`         | ESLint                                            |
+| `npm run typecheck`    | `tsc --noEmit`                                    |
+| `npm test`             | Unit tests (`node --test`, no extra dependencies) |
+| `npm run format`       | Rewrite files with Prettier                       |
+| `npm run format:check` | Verify formatting without writing                 |
 
-Before opening a pull request, run `npm run build` and `npm run lint` and make
-sure both pass. CI runs the same checks.
+Before opening a pull request, run `npm run build`, `npm run lint`,
+`npm run typecheck` and `npm test`, and make sure all four pass. CI runs the
+same checks.
+
+Tests live in `tests/` and use Node's built-in test runner, so there is no test
+framework to install. Run a single file with:
+
+```bash
+node --test tests/base-path.test.mjs
+```
 
 ## Understand the layout first
 

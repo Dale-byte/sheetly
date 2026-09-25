@@ -9,6 +9,8 @@
     "build:dev": "vite build --mode development && node scripts/postbuild.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
