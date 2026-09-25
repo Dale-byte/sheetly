@@ -45,6 +45,7 @@ Notes:
 - The app repo (`Dale-byte/sheetly`) is **public** because GitHub Pages requires it, but it contains only code - no data and no secrets. `.env` is gitignored and has never been committed.
 - Your budget and your token live only in your **private** data repo and in this browser's localStorage.
 - Secret scanning and push protection are worth enabling on the app repo (Settings → Code security and analysis), so an accidental credential push is blocked and flagged instead of merged.
+- Before using the legacy budget app, please read **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)**. It documents confirmed, currently unfixed defects in how data is imported, exported, and migrated — including one that can permanently destroy data.
 
 ## Features
 
