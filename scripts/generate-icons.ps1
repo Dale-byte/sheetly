@@ -11,10 +11,13 @@
 #   - favicons (16/32):        logo spans ~82% of the tile (stays legible)
 #
 # Usage:
-#   powershell -File scripts/generate-icons.ps1                          # default source below
 #   powershell -File scripts/generate-icons.ps1 -Source "path\to\icon.png"
+#
+# -Source is required. The master logo is intentionally not committed (it is a
+# large binary), so there is no sensible default to fall back to.
 param(
-  [string]$Source = "C:\Users\daelf\Documents\vibecode_projects\Sheetly\Sheetly icon.png"
+  [Parameter(Mandatory = $true)]
+  [string]$Source
 )
 
 Add-Type -AssemblyName System.Drawing
