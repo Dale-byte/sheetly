@@ -56,11 +56,34 @@ if (!existsSync(swPath)) {
   process.exit(1);
 }
 
+// The budget page references its sub-resources with a `?v=` token. Those tokens
+// were hand-written and identical on every release, so the browser (max-age)
+// and the cache-first service worker could both serve the previous release's
+// app.js. Rewrite them to the commit SHA so every deploy uses fresh URLs.
+const versioned = new Set(["budget/app.js", "budget/styles.css", "budget/calculator.js"]);
+const withVersion = (p) => (versioned.has(p) ? `${p}?v=${VERSION}` : p);
+
+const indexHtmlPath = join(dist, "budget", "index.html");
+const html = readFileSync(indexHtmlPath, "utf8");
+const revHtml = html.replace(
+  /((?:app\.js|styles\.css|calculator\.js))\?v=[^"'\s)]+/g,
+  `$1?v=${VERSION}`,
+);
+writeFileSync(indexHtmlPath, revHtml);
+for (const p of versioned) {
+  const name = p.split("/").pop();
+  if (!revHtml.includes(`${name}?v=${VERSION}`)) {
+    console.error(`post-build: FAILED to version ${name} in budget/index.html`);
+    process.exit(1);
+  }
+}
+
 const precache = [
   `${BASE}/`,
   ...listFiles(dist)
     .filter((p) => p !== swPath && !p.endsWith(".map"))
-    .map((p) => `${BASE}/${relative(dist, p).replace(/\\/g, "/")}`)
+    .map((p) => withVersion(relative(dist, p).replace(/\\/g, "/")))
+    .map((p) => `${BASE}/${p}`)
     .sort(),
 ];
 
@@ -73,4 +96,5 @@ sw = sw.replace(
 writeFileSync(swPath, sw);
 
 console.log(`post-build: copied ${from} -> ${to}`);
+console.log(`post-build: budget assets pinned to ?v=${VERSION}`);
 console.log(`post-build: stamped sw.js (version ${VERSION}, ${precache.length} precache entries)`);
