@@ -1,14 +1,15 @@
 # Review Status
 
 Status of the repository review, so the outcome is recorded rather than living in
-conversation history. Last updated at commit `0999c19`.
+conversation history. Last updated at commit `1ac006b`.
 
-**Current state: both review tracks are complete.** Nothing is pushed; the work
-sits on the local branch `cleanup/repo-review`, 16 commits ahead of
-`origin/main`.
+**Current state: both review tracks are complete, and the data-integrity defects
+are now fixed too.** The work sits on the local branch `cleanup/repo-review`,
+18 commits ahead of `origin/main`. `main` is untouched.
 
-Data-integrity defects that were found but deliberately **not** fixed are
-documented separately in [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+The data-integrity defects are recorded in
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md), which now lists them as fixed and keeps the
+original findings for context.
 
 ---
 
@@ -35,13 +36,13 @@ pre-existing React Refresh warnings; seven key `/sheetly/` preview paths return
 
 ## Track B - security and runtime correctness (complete)
 
-| Item                                | Outcome      | Detail                                                                        |
-| ----------------------------------- | ------------ | ----------------------------------------------------------------------------- |
-| B-FIX-1 `postMessage` vulnerability | **Fixed**    | `0705a66`                                                                     |
-| B-FIX-2 reject empty save payloads  | **Dropped**  | Would break legitimate deletion sync                                          |
-| B-FIX-3 standalone blank page       | **Fixed**    | `1e1fee2`, tests hardened in `f0a4858`                                        |
-| B-FIX-8a category management code   | **Retained** | `0999c19` - documented as an unfinished feature, not dead code                |
-| B-FIX-8b `currencySymbol` escaping  | **Open**     | Left as issue 5 in `KNOWN_ISSUES.md` - import-only vector, low practical risk |
+| Item                                | Outcome      | Detail                                                                                      |
+| ----------------------------------- | ------------ | ------------------------------------------------------------------------------------------- |
+| B-FIX-1 `postMessage` vulnerability | **Fixed**    | `0705a66`                                                                                   |
+| B-FIX-2 reject empty save payloads  | **Dropped**  | Would break legitimate deletion sync                                                        |
+| B-FIX-3 standalone blank page       | **Fixed**    | `1e1fee2`, tests hardened in `f0a4858`                                                      |
+| B-FIX-8a category management code   | **Retained** | `0999c19` - documented as an unfinished feature, not dead code                              |
+| B-FIX-8b `currencySymbol` escaping  | **Fixed**    | `1ac006b` - `formatCurrency()` escapes the symbol before it reaches an `innerHTML` template |
 
 ### B-FIX-1: message origin validation
 
@@ -91,10 +92,53 @@ the view refresh fails. `categories` is live data used by Quick Add, item counts
 and export.
 
 Deleting these would have removed the only way to add, edit, or remove a
-category, so they are retained and documented instead. See issue 8 in
-`KNOWN_ISSUES.md`, which records the decision so it is not re-proposed.
+category, so they were retained and documented instead. The correct fix was to
+implement `renderCategories()` and wire it to a nav entry, which is what `1ac006b`
+does: a `category-groups` view, a nav entry, and a refresh after every mutation.
 
 ---
+
+## Track C - data integrity (complete)
+
+| Issue | Defect                                               | Severity | Commit    |
+| ----- | ---------------------------------------------------- | -------- | --------- |
+| 1     | Import destroyed `tags`, `debts`, `payslips`         | Critical | `1ac006b` |
+| 2     | Load-time dedup deleted duplicate-named items        | Critical | `1ac006b` |
+| 3     | Buffer migration discarded extra `New Buffer` groups | Critical | `1ac006b` |
+| 4     | `settings.schemaVersion` written but never read      | High     | `1ac006b` |
+| 5     | `currencySymbol` inserted unescaped into HTML        | High     | `1ac006b` |
+| 6     | `\|\| 0` hid bad amounts behind wrong totals         | Medium   | `1ac006b` |
+| 7     | IndexedDB had no `debts`/`payslips` stores           | Medium   | `1ac006b` |
+| 8     | Category management unreachable from the UI          | Medium   | `1ac006b` |
+
+All eight were found by reading `public/budget/app.js` and fixed in one commit.
+They could not be split into per-issue commits without hand-editing the
+verified diff back apart, which risked reintroducing the very bugs being fixed,
+so the commit message enumerates each defect instead. See
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md) for the full list and the caveats that remain.
+
+### Verification performed for Track C
+
+- `npm run build`, `npm run lint`, `npm run typecheck`, `npm test` (27 tests),
+  `npm run format:check` all pass. Lint exits 0 with the six pre-existing React
+  Refresh warnings.
+- Real browser, throwaway profile, **synthetic data only**: seeded two
+  same-named items, three groups including two `New Buffer`, one debt, and one
+  payslip, then loaded and saved. 16/16 assertions passed - both duplicates
+  survive, all three groups survive with the first renamed to `Total Buffer` and
+  the second kept, debts and payslips are present in localStorage and are
+  written to IndexedDB, the store list is v2, and the Categories view renders and
+  creates a record without throwing.
+- The same harness produced two initial failures, both of which turned out to be
+  faults in the harness rather than the app: the buffer migration renames in
+  memory and only persists on the next save, and the new IndexedDB stores start
+  empty because nothing had triggered a save yet. Corrected the probes and both
+  pass. Worth knowing the rename is not written until something else saves.
+- The shell→iframe handshake was re-verified after the fixes: the iframe mounts,
+  the frame is same-origin reachable, and the app renders the Dashboard inside
+  the frame. 4/4 assertions passed.
+- The temporary harnesses were deleted; no verification scaffolding remains in the
+  repository.
 
 ## Corrections to the original review
 
@@ -114,7 +158,7 @@ are not reintroduced:
 ## Verification performed
 
 - `npm run build`, `npm run lint`, `npm run typecheck`, `npm test`,
-  `npm run format:check` all pass (22 tests).
+  `npm run format:check` all pass (27 tests).
 - Confirmed in a real browser via the Chrome DevTools Protocol that the
   standalone budget page renders, the shell mounts, and - seeding a fake config
   so the shell gets past the Connect screen - the **full framed production path
@@ -128,11 +172,21 @@ are not reintroduced:
 
 ## Remaining known work
 
-Only the data-integrity defects in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) remain,
-plus B-FIX-8b. They are not scheduled: each requires an explicit decision about
-how real data should be migrated, and the standing rule for this project is that
-user data is never altered without that decision.
+No known defects remain open. The `public/backup-full.html` diagnostic page
+added in `76047dc` was removed again in this series: it was written while the
+load-time data loss was still present, so its hazard report described deletion
+behaviour that no longer exists, and it was not wanted.
 
-Priority if that changes: issue 1 (import destroys data), then issue 2 (load-time
-pruning), then issue 3 (migration), each with a verified copy of real data taken
-first.
+The caveats in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) still apply to how the fixes
+behave in normal use: import is a full replace rather than a merge, a non-numeric
+amount becomes `0` and is logged rather than throwing, and an extra
+`New Buffer` group keeps its old name until renamed by hand.
+
+## Not done here
+
+- **No real data was ever read, written, or migrated during this work.** Every
+  verification used synthetic fixtures in a throwaway Chrome profile. The
+  load-time fixes will act on real data the first time the app is opened after
+  this is deployed, so taking one export beforehand is still worth doing.
+- **The eight fixes are one commit.** See Track C for why.
+- **`package-lock.json` is unchanged** and no dependencies were added.

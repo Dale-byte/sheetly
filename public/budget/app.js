@@ -1,6 +1,10 @@
 const CONSTANTS = {
   DB_NAME: 'SheetlyDB',
-  DB_VERSION: 1,
+  // v2 adds the 'debts' and 'payslips' stores, which v1 never created, so those
+  // two collections were not persisted through the IndexedDB path. The upgrade
+  // only creates empty stores; it does not read, move, or delete any existing
+  // record, and localStorage remains the primary store and is read first.
+  DB_VERSION: 2,
   STORAGE_KEY: 'sheetly_data',
   SCHEMA_VERSION: 1
 };
@@ -13,9 +17,38 @@ const generateId = () => {
   }
 };
 
+// Coerce an amount to a finite number for arithmetic.
+//
+// `x || 0` is not safe here: it turns NaN into 0, hiding a bad value, but lets a
+// truthy non-numeric string through, where `sum + "abc"` concatenates and
+// produces garbage like "0abc". This returns a real number in every case and
+// reports the bad ones instead of silently swallowing them.
+const toAmount = (value, context) => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : reportBadAmount(value, context);
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  if (value === null || value === undefined || value === '') return 0;
+  return reportBadAmount(value, context);
+};
+
+const badAmountsSeen = new Set();
+const reportBadAmount = (value, context) => {
+  const key = String(context || 'amount') + ':' + String(value);
+  if (!badAmountsSeen.has(key)) {
+    badAmountsSeen.add(key);
+    console.warn('Ignoring non-numeric amount', JSON.stringify(value),
+      context ? '(' + context + ')' : '');
+  }
+  return 0;
+};
+
 const formatCurrency = (amount, symbol = null) => {
-  const num = typeof amount === 'number' ? amount : parseFloat(amount) || 0;
-  const sym = symbol || appState.settings.currencySymbol || 'R';
+  const num = toAmount(amount, 'formatCurrency');
+  const sym = esc(symbol || appState.settings.currencySymbol || 'R');
   const decimals = appState.settings.showCents !== false ? 2 : 0;
   return `${sym}${num.toLocaleString('en-ZA', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
 };
@@ -133,6 +166,12 @@ const openDB = () => {
       if (!database.objectStoreNames.contains('tags')) {
         database.createObjectStore('tags', { keyPath: 'id' });
       }
+      if (!database.objectStoreNames.contains('debts')) {
+        database.createObjectStore('debts', { keyPath: 'id' });
+      }
+      if (!database.objectStoreNames.contains('payslips')) {
+        database.createObjectStore('payslips', { keyPath: 'id' });
+      }
     };
   });
 };
@@ -172,7 +211,7 @@ const deleteFromDB = async (storeName, id) => {
 
 const clearDB = async () => {
   if (!db) await openDB();
-  const stores = ['settings', 'sheets', 'groups', 'items', 'recurring', 'categories', 'templates', 'tags'];
+    const stores = ['settings', 'sheets', 'groups', 'items', 'recurring', 'categories', 'templates', 'tags', 'debts', 'payslips'];
   for (const storeName of stores) {
     await new Promise((resolve, reject) => {
       const transaction = db.transaction(storeName, 'readwrite');
@@ -217,6 +256,32 @@ const saveToLocalStorage = () => {
 };
 
 const loadData = async () => {
+  // Version gate. schemaVersion was previously written but never read, so every
+  // load re-ran the legacy migrations below and relied on name matching. The
+  // migrations are now non-destructive, but the recorded version is still read
+  // so future migrations have an explicit signal to branch on.
+  const readSchemaVersion = (state) => {
+    const v = state && state.settings && state.settings.schemaVersion;
+    return typeof v === 'number' ? v : 0;
+  };
+  
+  const applyMigrations = (state) => {
+    const stored = readSchemaVersion(state);
+    if (stored > CONSTANTS.SCHEMA_VERSION) {
+      // Data written by a newer build. Refuse to guess, and say so rather than
+      // letting a legacy migration rewrite records it does not understand.
+      console.warn(
+        'Data schema version ' + stored + ' is newer than this build supports (' +
+        CONSTANTS.SCHEMA_VERSION + '). Skipping legacy migrations to avoid damaging it.'
+      );
+      return false;
+    }
+    if (stored < CONSTANTS.SCHEMA_VERSION) {
+      console.log('Migrating data schema from version ' + stored + ' to ' + CONSTANTS.SCHEMA_VERSION);
+    }
+    return true;
+  };
+  
   // Try localStorage first
   var data = localStorage.getItem(CONSTANTS.STORAGE_KEY);
   if (data) {
@@ -224,41 +289,40 @@ const loadData = async () => {
       var parsed = JSON.parse(data);
       if (parsed.sheets && parsed.sheets.length > 0) {
         appState = { ...appState, ...parsed };
-        if (appState.groups) {
+        if (appState.groups && applyMigrations(appState)) {
+          // Rename only the first legacy buffer group. Earlier versions dropped
+          // any further matches, which silently deleted groups and synced the
+          // deletion. Every group is kept now; the extras keep their old name so
+          // nothing is lost, and are reported so they can be reviewed by hand.
           var hasTotalBuffer = false;
           for (var i = 0; i < appState.groups.length; i++) {
             if (appState.groups[i].name === 'Total Buffer') hasTotalBuffer = true;
           }
-          var newGroups = [];
+          var renamedBuffer = false;
+          var keptLegacyBuffers = [];
           for (var i = 0; i < appState.groups.length; i++) {
             var g = appState.groups[i];
-            if (g.name === 'New Buffer' || g.name === 'Total (Buffer/Variable)') {
-              if (!hasTotalBuffer) {
-                g.name = 'Total Buffer';
-                hasTotalBuffer = true;
-                newGroups.push(g);
-              }
-            } else {
-              newGroups.push(g);
+            if (!renamedBuffer && !hasTotalBuffer
+                && (g.name === 'New Buffer' || g.name === 'Total (Buffer/Variable)')) {
+              g.name = 'Total Buffer';
+              renamedBuffer = true;
+            } else if (g.name === 'New Buffer' || g.name === 'Total (Buffer/Variable)') {
+              keptLegacyBuffers.push(g.name);
             }
           }
-          appState.groups = newGroups;
+          if (renamedBuffer) {
+            console.log('Renamed a legacy buffer group to "Total Buffer"');
+          }
+          if (keptLegacyBuffers.length) {
+            console.warn('Kept extra legacy buffer groups unrenamed (previously deleted):',
+              keptLegacyBuffers);
+          }
         }
         
-        // Deduplicate items: keep only first item per groupId+name combo
-        if (appState.items && appState.items.length > 0) {
-          var seen = {};
-          var uniqueItems = [];
-          for (var i = 0; i < appState.items.length; i++) {
-            var it = appState.items[i];
-            var key = it.groupId + '|' + it.name;
-            if (!seen[key]) {
-              seen[key] = true;
-              uniqueItems.push(it);
-            }
-          }
-          appState.items = uniqueItems;
-        }
+        // Items are NOT deduplicated here. Two items may legitimately share a
+        // name within a group, and pruning them here silently deleted records
+        // on every load and synced the deletion to the cloud. Ambiguous records
+        // are surfaced by the backup page instead of being destroyed.
         if (!appState.currentSheetId || !appState.sheets.some(s => s.id === appState.currentSheetId)) {
           appState.currentSheetId = appState.sheets[0].id;
         }
@@ -281,6 +345,8 @@ const loadData = async () => {
     var categories = await getAllFromDB('categories');
     var templates = await getAllFromDB('templates');
     var tags = await getAllFromDB('tags');
+    var debts = await getAllFromDB('debts');
+    var payslips = await getAllFromDB('payslips');
     
     if (settings.length > 0) appState.settings = settings[0];
     appState.sheets = sheets || [];
@@ -290,44 +356,35 @@ const loadData = async () => {
     appState.categories = categories || [];
     appState.templates = templates || [];
     appState.tags = tags || [];
+    appState.debts = debts || [];
+    appState.payslips = payslips || [];
     
-    if (appState.groups.length > 0) {
+    if (appState.groups.length > 0 && applyMigrations(appState)) {
+      // Rename only the first legacy buffer group and keep the rest, matching
+      // the localStorage path above.
       var hasTotalBuffer = false;
       for (var i = 0; i < appState.groups.length; i++) {
         if (appState.groups[i].name === 'Total Buffer') hasTotalBuffer = true;
       }
-      // Rename first occurrence, remove others
-      var newGroups = [];
+      var renamedBuffer = false;
+      var keptLegacyBuffers = [];
       for (var i = 0; i < appState.groups.length; i++) {
         var g = appState.groups[i];
-        if (g.name === 'New Buffer' || g.name === 'Total (Buffer/Variable)') {
-          if (!hasTotalBuffer) {
-            g.name = 'Total Buffer';
-            hasTotalBuffer = true;
-            newGroups.push(g);
-          }
-        } else {
-          newGroups.push(g);
+        if (!renamedBuffer && !hasTotalBuffer
+            && (g.name === 'New Buffer' || g.name === 'Total (Buffer/Variable)')) {
+          g.name = 'Total Buffer';
+          renamedBuffer = true;
+        } else if (g.name === 'New Buffer' || g.name === 'Total (Buffer/Variable)') {
+          keptLegacyBuffers.push(g.name);
         }
       }
-      appState.groups = newGroups;
-    }
-    
-    // Deduplicate items from IndexedDB
-    if (appState.items && appState.items.length > 0) {
-      var seen = {};
-      var uniqueItems = [];
-      for (var i = 0; i < appState.items.length; i++) {
-        var it = appState.items[i];
-        var key = it.groupId + '|' + it.name;
-        if (!seen[key]) {
-          seen[key] = true;
-          uniqueItems.push(it);
-        }
+      if (keptLegacyBuffers.length) {
+        console.warn('Kept extra legacy buffer groups unrenamed (previously deleted):',
+          keptLegacyBuffers);
       }
-      appState.items = uniqueItems;
     }
     
+    // Items are NOT deduplicated here - see the localStorage path above.
     if (appState.sheets.length > 0) {
       if (!appState.currentSheetId || !appState.sheets.some(s => s.id === appState.currentSheetId)) {
         appState.currentSheetId = appState.sheets[0].id;
@@ -369,6 +426,12 @@ const saveData = async () => {
     for (const tag of appState.tags) {
       await saveToDB('tags', tag);
     }
+    for (const debt of appState.debts || []) {
+      await saveToDB('debts', debt);
+    }
+    for (const payslip of appState.payslips || []) {
+      await saveToDB('payslips', payslip);
+    }
   } catch (e) {
     console.error('IndexedDB save failed, data saved to localStorage only', e);
   }
@@ -378,8 +441,8 @@ const calculateTotals = (sheetId) => {
   const sheetItems = appState.items.filter(i => i.sheetId === sheetId && i.active);
   const groups = appState.groups.filter(g => g.sheetId === sheetId);
   
-  const grossIncome = appState.settings.grossIncome || 0;
-  const deductions = appState.settings.deductions || 0;
+  const grossIncome = toAmount(appState.settings.grossIncome, 'settings.grossIncome');
+  const deductions = toAmount(appState.settings.deductions, 'settings.deductions');
   const nettIncome = grossIncome - deductions;
   
   const totals = {
@@ -394,7 +457,7 @@ const calculateTotals = (sheetId) => {
     var groupItems = sheetItems.filter(function(item) { return item.groupId === group.id && item.active; });
     var sum = 0;
     for (var j = 0; j < groupItems.length; j++) {
-      sum += groupItems[j].amountTotal || 0;
+      sum += toAmount(groupItems[j].amountTotal, 'calculateTotals');
     }
     
     if (group.type === 'subsection') {
@@ -402,7 +465,7 @@ const calculateTotals = (sheetId) => {
     }
   }
   
-  const variable = totals.subsections['Variable'] || 0;
+  const variable = toAmount(totals.subsections['Variable'], 'subsections.Variable');
   
   totals.totalExpenses = Object.values(totals.subsections).reduce(function(a, b) { return a + b; }, 0);
   totals.currentBuffer = nettIncome - totals.totalExpenses;
@@ -410,7 +473,7 @@ const calculateTotals = (sheetId) => {
   var capitecSavings = 0;
   for (var ci = 0; ci < sheetItems.length; ci++) {
     if (sheetItems[ci].name === 'Capitec Savings' && sheetItems[ci].active) {
-      capitecSavings = sheetItems[ci].amountTotal || 0;
+      capitecSavings = toAmount(sheetItems[ci].amountTotal, 'capitecSavings');
       break;
     }
   }
@@ -580,6 +643,7 @@ const renderCurrentView = () => {
     case 'debts': renderDebts(); break;
     case 'payslip': renderPayslip(); break;
     case 'categories': renderNotes(); break;
+    case 'category-groups': renderCategories(); break;
     case 'templates': renderTemplates(); break;
     case 'settings': renderSettings(); break;
     case 'help': renderHelp(); break;
@@ -595,8 +659,8 @@ const renderDashboard = () => {
   const symbol = appState.settings.currencySymbol;
   const settings = appState.settings;
   
-  const grossIncome = settings.grossIncome || 0;
-  const deductions = settings.deductions || 0;
+  const grossIncome = toAmount(settings.grossIncome, 'settings.grossIncome');
+  const deductions = toAmount(settings.deductions, 'settings.deductions');
   const nettIncome = grossIncome - deductions;
   const totalExpenses = totals.totalExpenses;
   const netCash = nettIncome - totalExpenses;
@@ -658,12 +722,12 @@ const renderDashboard = () => {
 
     ${(() => {
       const debts = Array.isArray(appState.debts) ? appState.debts : [];
-      const totalBalance = debts.reduce((s, d) => s + (parseFloat(d.balance) || 0), 0);
-      const totalLimit = debts.reduce((s, d) => s + (parseFloat(d.limit) || 0), 0);
-      const totalMin = debts.reduce((s, d) => s + (parseFloat(d.minPayment) || 0), 0);
-      const totalPaid = debts.reduce((s, d) => s + (d.payments || []).reduce((a, p) => a + (parseFloat(p.amount) || 0), 0), 0);
+      const totalBalance = debts.reduce((s, d) => s + (toAmount(d.balance, 'debt.balance')), 0);
+      const totalLimit = debts.reduce((s, d) => s + (toAmount(d.limit, 'debt.limit')), 0);
+      const totalMin = debts.reduce((s, d) => s + (toAmount(d.minPayment, 'debt.minPayment')), 0);
+      const totalPaid = debts.reduce((s, d) => s + (d.payments || []).reduce((a, p) => a + (toAmount(p.amount, 'debt.payment')), 0), 0);
       const util = totalLimit > 0 ? Math.min(100, (totalBalance / totalLimit) * 100) : 0;
-      const highest = debts.slice().sort((a, b) => (parseFloat(b.balance) || 0) - (parseFloat(a.balance) || 0))[0];
+      const highest = debts.slice().sort((a, b) => toAmount(b.balance, 'debt.balance') - toAmount(a.balance, 'debt.balance'))[0];
       return `
       <div class="card mt-md">
         <div class="card-header">
@@ -699,7 +763,7 @@ const renderDashboard = () => {
               </div>
             </div>
           ` : ''}
-          ${highest ? `<div class="mt-md"><strong>Largest debt:</strong> ${esc(highest.name || 'Unnamed')} (${formatCurrency(parseFloat(highest.balance) || 0, symbol)})</div>` : ''}
+          ${highest ? `<div class="mt-md"><strong>Largest debt:</strong> ${esc(highest.name || 'Unnamed')} (${formatCurrency(toAmount(highest.balance, 'debt.balance'), symbol)})</div>` : ''}
         `}
       </div>`;
     })()}
@@ -790,8 +854,8 @@ const renderBudgetSheet = () => {
   let html = `<h1>Budget Sheet</h1>`;
   html += `<p class="mb-md"><strong>${esc(sheet ? sheet.name : 'Untitled')}</strong> - ${sheet ? esc(sheet.month + '/' + sheet.year) : ''}</p>`;
   
-  const grossIncome = appState.settings.grossIncome || 0;
-  const deductions = appState.settings.deductions || 0;
+  const grossIncome = toAmount(appState.settings.grossIncome, 'settings.grossIncome');
+  const deductions = toAmount(appState.settings.deductions, 'settings.deductions');
   const nettIncome = grossIncome - deductions;
   html += `<div class="card mb-md">
     <div class="flex-between">
@@ -821,7 +885,7 @@ const renderBudgetSheet = () => {
       if (items[ii].groupId === group.id) {
         groupItems.push(items[ii]);
         if (items[ii].active) {
-          groupTotal += items[ii].amountTotal || 0;
+          groupTotal += toAmount(items[ii].amountTotal, 'groupTotal');
         }
       }
     }
@@ -1733,6 +1797,77 @@ const switchNotesTab = (tab) => {
 
 window.switchNotesTab = switchNotesTab;
 
+// Categories management view.
+//
+// This was referenced by addCategory/editCategory/deleteCategory but never
+// defined, so those functions threw *after* they had already saved. They are
+// only reachable from the console, and calling them must not blank out whichever
+// view is currently open, so refreshCategories() re-renders the current view
+// unless the categories view is the active one.
+const refreshCategories = () => {
+  if (appState.activeView === 'category-groups') {
+    renderCategories();
+  } else {
+    renderCurrentView();
+  }
+};
+
+const renderCategories = () => {
+  const container = document.getElementById('view-container');
+  if (!container) return;
+  
+  const categories = appState.categories || [];
+  const groups = {};
+  categories.forEach(c => {
+    if (!c.groupName) return;
+    if (!groups[c.groupName]) groups[c.groupName] = [];
+    groups[c.groupName].push(c);
+  });
+  const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+  
+  const topActions = document.getElementById('top-actions');
+  if (topActions) {
+    topActions.innerHTML = `<button class="btn btn-primary" onclick="addCategoryPrompt()">Add Category</button>`;
+  }
+  
+  let html = `<h1>Categories</h1>`;
+  
+  if (categories.length === 0) {
+    html += `<div class="empty-state">
+      <h3>No categories yet</h3>
+      <p>Categories group your budget items for quick entry.</p>
+    </div>`;
+  } else {
+    html += `<div class="card mb-md">
+      <p class="muted">${categories.length} categor${categories.length === 1 ? 'y' : 'ies'} in ${groupNames.length} group${groupNames.length === 1 ? '' : 's'}.</p>
+    </div>`;
+    groupNames.forEach(name => {
+      html += `<div class="card mb-md">
+        <div class="card-header"><h2 class="card-title">${esc(name)}</h2></div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead><tr><th>Name</th><th>Default Amount</th><th>Status</th><th></th></tr></thead>
+            <tbody>`;
+      groups[name].forEach(c => {
+        html += `<tr>
+          <td>${esc(c.name)}</td>
+          <td class="numeric">${formatCurrency(c.defaultAmount)}</td>
+          <td>${c.archived ? '<span class="badge">Archived</span>' : '<span class="badge badge-success">Active</span>'}</td>
+          <td class="numeric">
+            <button class="btn btn-ghost btn-sm" onclick="editCategory('${esc(c.id)}')">Edit</button>
+            <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteCategory('${esc(c.id)}')">Delete</button>
+          </td>
+        </tr>`;
+      });
+      html += `</tbody></table>
+        </div>
+      </div>`;
+    });
+  }
+  
+  container.innerHTML = html;
+};
+
 const addCategoryPrompt = () => {
   showModal('Add Category', `
     <div class="form-group">
@@ -1773,7 +1908,7 @@ const confirmAddCategory = () => {
   appState.categories.push(category);
   saveData();
   hideModal();
-  renderCategories();
+  refreshCategories();
   showToast('Category added');
 };
 
@@ -1810,7 +1945,7 @@ const confirmEditCategory = (id) => {
   cat.archived = document.getElementById('cat-archived').checked;
   saveData();
   hideModal();
-  renderCategories();
+  refreshCategories();
   showToast('Category saved');
 };
 
@@ -1818,7 +1953,7 @@ const deleteCategory = (id) => {
   if (confirm('Delete this category?')) {
     appState.categories = appState.categories.filter(c => c.id !== id);
     saveData();
-    renderCategories();
+    refreshCategories();
     showToast('Category deleted');
   }
 };
@@ -1871,7 +2006,7 @@ const showTemplatePreview = (templateId) => {
   let groupTotals = {};
   for (const item of items) {
     if (!groupTotals[item.groupName]) groupTotals[item.groupName] = 0;
-    groupTotals[item.groupName] += item.amountTotal || 0;
+    groupTotals[item.groupName] += toAmount(item.amountTotal, 'groupTotals');
   }
   
   let html = `<h2>${esc(tmpl.name)}</h2><p class="mb-md">${esc(tmpl.description || '')}</p>`;
@@ -1879,7 +2014,7 @@ const showTemplatePreview = (templateId) => {
   
   for (const group of groups.filter(g => g.type === 'subsection')) {
     const count = items.filter(i => i.groupName === group.name).length;
-    const total = groupTotals[group.name] || 0;
+    const total = toAmount(groupTotals[group.name], 'groupTotals');
     html += `<tr><td>${esc(group.name)}</td><td class="numeric">${count}</td><td class="numeric">${formatCurrency(total, symbol)}</td></tr>`;
   }
   
@@ -2413,26 +2548,21 @@ const restoreBackup = function(key) {
     appState = { ...appState, ...parsed };
     appState.currentSheetId = appState.sheets[0] ? appState.sheets[0].id : null;
     
-    // Migration: fix old group names
+    // Migration: rename only the first legacy buffer group, keep the rest.
     if (appState.groups) {
       var hasTotalBuffer = false;
       for (var i = 0; i < appState.groups.length; i++) {
         if (appState.groups[i].name === 'Total Buffer') hasTotalBuffer = true;
       }
-      var newGroups = [];
+      var renamedBuffer = false;
       for (var i = 0; i < appState.groups.length; i++) {
         var g = appState.groups[i];
-        if (g.name === 'New Buffer' || g.name === 'Total (Buffer/Variable)') {
-          if (!hasTotalBuffer) {
-            g.name = 'Total Buffer';
-            hasTotalBuffer = true;
-            newGroups.push(g);
-          }
-        } else {
-          newGroups.push(g);
+        if (!renamedBuffer && !hasTotalBuffer
+            && (g.name === 'New Buffer' || g.name === 'Total (Buffer/Variable)')) {
+          g.name = 'Total Buffer';
+          renamedBuffer = true;
         }
       }
-      appState.groups = newGroups;
     }
     
     saveData();
@@ -2686,6 +2816,9 @@ const updateSetting = async (key, value) => {
 };
 
 const exportData = () => {
+  // Every collection in appState is included. Omitting any of them makes the
+  // export unable to restore that collection, so keep this list in step with
+  // saveToLocalStorage().
   const data = {
     version: CONSTANTS.SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
@@ -2695,7 +2828,10 @@ const exportData = () => {
     items: appState.items,
     recurringItems: appState.recurringItems,
     categories: appState.categories,
-    templates: appState.templates
+    templates: appState.templates,
+    tags: appState.tags,
+    debts: appState.debts || [],
+    payslips: appState.payslips || []
   };
   
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -2725,7 +2861,9 @@ const createBackup = () => {
     recurringItems: appState.recurringItems,
     categories: appState.categories,
     templates: appState.templates,
-    tags: appState.tags
+    tags: appState.tags,
+    debts: appState.debts || [],
+    payslips: appState.payslips || []
   };
   
   try {
@@ -2790,7 +2928,7 @@ const exportToExcel = () => {
   
   for (const group of groups) {
     const groupItems = items.filter(i => i.groupId === group.id);
-    const groupTotal = groupItems.filter(i => i.active).reduce((sum, i) => sum + (i.amountTotal || 0), 0);
+    const groupTotal = groupItems.filter(i => i.active).reduce((sum, i) => sum + toAmount(i.amountTotal, 'groupTotal'), 0);
     
     if (group.type === 'section') {
       html += '<h2>' + esc(group.name) + '</h2>';
@@ -2844,28 +2982,50 @@ const importData = (input) => {
         return;
       }
       
-      if (confirm('This will replace all existing data. Continue?')) {
-        appState = {
-          settings: data.settings,
-          sheets: data.sheets || [],
-          groups: data.groups || [],
-          items: data.items || [],
-          recurringItems: data.recurringItems || [],
-          categories: data.categories || [],
-          templates: data.templates || [],
-          currentSheetId: data.sheets && data.sheets[0] ? data.sheets[0].id : null,
-          activeView: 'dashboard'
-        };
-        
-        await clearDB();
-        await saveData();
-        
-        if (appState.currentSheetId) {
-          navigate('dashboard');
-        }
-        
-        showToast('Data imported successfully');
+      // Older exports were written before tags/debts/payslips were included, so
+      // they arrive as undefined. That is a gap in the file, not a reason to drop
+      // whatever the current device already has for those collections.
+      const incoming = {
+        sheets: data.sheets || [],
+        groups: data.groups || [],
+        items: data.items || [],
+        recurringItems: data.recurringItems || [],
+        categories: data.categories || [],
+        templates: data.templates || [],
+        tags: data.tags || [],
+        debts: data.debts || [],
+        payslips: data.payslips || []
+      };
+      
+      const counts = Object.entries(incoming)
+        .map(([k, v]) => `${k}: ${v.length}`)
+        .join(', ');
+      const missing = Object.entries(incoming)
+        .filter(([, v]) => v.length === 0)
+        .map(([k]) => k);
+      
+      let warning = `This will replace all existing data with the file's contents (${counts}).`;
+      if (missing.length) {
+        warning += `\n\nWARNING: the file contains no records for: ${missing.join(', ')}. `
+          + `Importing will leave those collections empty.`;
       }
+      if (!confirm(warning + '\n\nContinue?')) return;
+      
+      appState = {
+        settings: data.settings,
+        ...incoming,
+        currentSheetId: data.sheets && data.sheets[0] ? data.sheets[0].id : null,
+        activeView: 'dashboard'
+      };
+      
+      await clearDB();
+      await saveData();
+      
+      if (appState.currentSheetId) {
+        navigate('dashboard');
+      }
+      
+      showToast('Data imported successfully');
     } catch (err) {
       showToast('Import failed: ' + err.message);
     }
@@ -3014,10 +3174,10 @@ const renderDebts = () => {
   const symbol = appState.settings.currencySymbol;
   const debts = appState.debts;
 
-  const totalBalance = debts.reduce((s, d) => s + (parseFloat(d.balance) || 0), 0);
-  const totalLimit = debts.reduce((s, d) => s + (parseFloat(d.limit) || 0), 0);
-  const totalMin = debts.reduce((s, d) => s + (parseFloat(d.minPayment) || 0), 0);
-  const totalPaid = debts.reduce((s, d) => s + (d.payments || []).reduce((a, p) => a + (parseFloat(p.amount) || 0), 0), 0);
+  const totalBalance = debts.reduce((s, d) => s + (toAmount(d.balance, 'debt.balance')), 0);
+  const totalLimit = debts.reduce((s, d) => s + (toAmount(d.limit, 'debt.limit')), 0);
+  const totalMin = debts.reduce((s, d) => s + (toAmount(d.minPayment, 'debt.minPayment')), 0);
+  const totalPaid = debts.reduce((s, d) => s + (d.payments || []).reduce((a, p) => a + (toAmount(p.amount, 'debt.payment')), 0), 0);
 
   document.getElementById('top-actions').innerHTML =
     `<button class="btn btn-primary" onclick="openDebtModal()">+ Add Debt</button>`;
@@ -3027,10 +3187,10 @@ const renderDebts = () => {
     rows = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted,#888)">No debts yet. Click "Add Debt" to get started.</td></tr>`;
   } else {
     rows = debts.map(d => {
-      const bal = parseFloat(d.balance) || 0;
-      const lim = parseFloat(d.limit) || 0;
+      const bal = toAmount(d.balance, 'debt.balance');
+      const lim = toAmount(d.limit, 'debt.limit');
       const util = lim > 0 ? Math.min(100, (bal / lim) * 100) : 0;
-      const paid = (d.payments || []).reduce((a, p) => a + (parseFloat(p.amount) || 0), 0);
+      const paid = (d.payments || []).reduce((a, p) => a + (toAmount(p.amount, 'debt.payment')), 0);
       return `
         <tr>
           <td class="debt-name"><strong>${esc(d.name)}</strong><br><small style="color:var(--text-muted,#888)">${esc(d.type || 'Credit Card')}</small></td>
@@ -3251,7 +3411,7 @@ const normalisePayslipCategory = (c) => (c === 'earning' ? 'allowance' : (c === 
 
 const payslipTotals = (ps) => {
   const lines = (ps.lines || []);
-  const sum = (k) => lines.filter(l => normalisePayslipCategory(l.category) === k).reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+  const sum = (k) => lines.filter(l => normalisePayslipCategory(l.category) === k).reduce((s, l) => s + (toAmount(l.amount, 'payslip.amount')), 0);
   const allowances = sum('allowance');
   const deductions = sum('deduction');
   return { allowances, deductions, contributions: sum('contribution'), fringe: sum('fringe'), net: allowances - deductions };
