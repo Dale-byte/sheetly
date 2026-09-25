@@ -12,6 +12,18 @@
     <link rel="apple-touch-icon" href="/sheetly/icons/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <script>
+      // Refuse to be framed. GitHub Pages cannot send X-Frame-Options or
+      // CSP frame-ancestors (those are response headers only, and _headers is
+      // a Netlify/Cloudflare feature), so this is the only clickjacking
+      // defence available here. The shell legitimately frames
+      // /sheetly/budget/index.html, which is same-origin, so this does not
+      // affect the app's own iframe.
+      if (window.top !== window.self) {
+        window.top.location = window.self.location;
+      }
+    </script>
     <meta name="apple-mobile-web-app-title" content="Sheetly" />
   </head>
   <body>

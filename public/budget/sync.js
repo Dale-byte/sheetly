@@ -11,15 +11,22 @@
   var deferredDCL = [];
   var initReceived = false;
 
+  // Opened directly (no host frame), e.g. /sheetly/budget/index.html in a tab.
+  // Nothing will ever send us an init, so deferring boot would leave the page
+  // blank forever. Run normally instead.
+  var framed = window.parent && window.parent !== window;
+
   // Intercept DOMContentLoaded so app.js's init waits for our snapshot.
-  var origAdd = document.addEventListener.bind(document);
-  document.addEventListener = function (type, listener, opts) {
-    if (type === 'DOMContentLoaded' && !initReceived) {
-      deferredDCL.push(listener);
-      return;
-    }
-    return origAdd(type, listener, opts);
-  };
+  if (framed) {
+    var origAdd = document.addEventListener.bind(document);
+    document.addEventListener = function (type, listener, opts) {
+      if (type === 'DOMContentLoaded' && !initReceived) {
+        deferredDCL.push(listener);
+        return;
+      }
+      return origAdd(type, listener, opts);
+    };
+  }
 
   function fireDeferred() {
     initReceived = true;
@@ -96,5 +103,9 @@
   });
 
   // Tell parent we're alive and ready to receive snapshot.
-  send('hello', null);
+  // Standalone: no parent, so no handshake and no pushes (ready stays false,
+  // which keeps the setItem hook from posting into the void).
+  if (framed) {
+    send('hello', null);
+  }
 })();
