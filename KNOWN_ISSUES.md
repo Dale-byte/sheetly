@@ -18,16 +18,16 @@ or dropped — see [REVIEW_STATUS.md](REVIEW_STATUS.md).
 
 ## Status
 
-| #   | Defect                                                       | Severity | Status |
-| --- | ------------------------------------------------------------ | -------- | ------ |
-| 1   | Import silently destroyed `tags`, `debts`, `payslips`        | Critical | Fixed  |
-| 2   | Loading the app silently deleted duplicate-named items       | Critical | Fixed  |
-| 3   | Legacy migration discarded extra `New Buffer` groups         | Critical | Fixed  |
-| 4   | `settings.schemaVersion` written but never read              | High     | Fixed  |
-| 5   | `currencySymbol` from an import inserted unescaped into HTML | High     | Fixed  |
-| 6   | Totals used `\|\| 0`, hiding bad amounts as wrong totals     | Medium   | Fixed  |
-| 7   | IndexedDB fallback had no `debts`/`payslips` stores          | Medium   | Fixed  |
-| 8   | Category management was unreachable from the UI              | Medium   | Fixed  |
+| #   | Defect                                                       | Severity | Status                                  |
+| --- | ------------------------------------------------------------ | -------- | --------------------------------------- |
+| 1   | Import silently destroyed `tags`, `debts`, `payslips`        | Critical | Fixed                                   |
+| 2   | Loading the app silently deleted duplicate-named items       | Critical | Fixed                                   |
+| 3   | Legacy migration discarded extra `New Buffer` groups         | Critical | Fixed                                   |
+| 4   | `settings.schemaVersion` written but never read              | High     | Fixed                                   |
+| 5   | `currencySymbol` from an import inserted unescaped into HTML | High     | Fixed                                   |
+| 6   | Totals used `\|\| 0`, hiding bad amounts as wrong totals     | Medium   | Fixed                                   |
+| 7   | IndexedDB fallback had no `debts`/`payslips` stores          | Medium   | Fixed                                   |
+| 8   | Category management was unreachable from the UI              | Medium   | Removed by owner request - not a defect |
 
 ## What changed
 
@@ -54,9 +54,14 @@ or dropped — see [REVIEW_STATUS.md](REVIEW_STATUS.md).
    rewritten mid-keystroke.
 7. **IndexedDB stores `debts` and `payslips`.** Bumped to `DB_VERSION 2`,
    created both stores, and wired them into load, save, and reset.
-8. **Category management is reachable.** A `category-groups` view with
-   `renderCategories()` / `refreshCategories()`, a nav entry, and a refresh
-   after every create, edit, and delete.
+
+Item 8 is not a fix. Category management **was** briefly implemented, then
+removed again at the owner's request: there is no Categories nav entry, no
+`category-groups` route, and no `renderCategories()`. The `categories` data
+itself is untouched and still used by Quick Add, the item count, and
+export/import. Treat the absence of a category management screen as a settled
+decision, not a defect — see B-FIX-8a in [REVIEW_STATUS.md](REVIEW_STATUS.md),
+which is written specifically to stop a future review reopening it.
 
 Regression coverage lives in `tests/export-import.test.mjs` (round trip keeps
 every collection). The load-time behaviour and the shell→iframe handshake were
@@ -143,7 +148,7 @@ was the value validation, not the aggregation itself.
 If the app fell back to IndexedDB, the store definitions did not include those
 two collections, so they were not persisted through that path.
 
-### 8. Category management is an unfinished feature
+### 8. Category management (removed at the owner's request - not a defect)
 
 `addCategoryPrompt`, `editCategory`, `confirmAddCategory`,
 `confirmEditCategory`, and `deleteCategory` were exposed on `window` but not
@@ -155,11 +160,18 @@ refreshed and the function threw afterwards.
 The practical effect: calling these from the console _would_ change and persist
 categories while appearing to fail, and the screen would look unchanged.
 
-These functions were deliberately **retained**, not deleted. An earlier review
-flagged them as dead code, which was wrong: the mutation and `saveData()` both
-completed before the missing renderer threw. Deleting them would have removed
-the only way to add, edit, or remove a category. The correct fix was to
-implement `renderCategories()` and wire it to a nav entry.
+An earlier review flagged them as dead code, which was wrong: the mutation and
+`saveData()` both completed before the missing renderer threw. They were
+retained, then `renderCategories()` was implemented and a **Categories** nav
+entry added. The owner does not want the feature, so the whole management
+surface has been removed again. The five mutators, `renderCategories()`,
+`refreshCategories()`, the `category-groups` route, and the nav entry are all
+gone, and nothing is exposed on `window` for them.
+
+**The `categories` data is retained and unaffected.** Quick Add, the dashboard
+item count, and export/backup/import all still read it, and the IndexedDB store
+still exists. The only consequence is that a category can no longer be created,
+edited, or deleted from the UI; existing records keep working.
 
 ---
 
@@ -177,3 +189,6 @@ implement `renderCategories()` and wire it to a nav entry.
   total looks wrong.
 - **An extra `New Buffer` group is kept under its old name** rather than being
   renamed or merged. Rename it by hand if you want the name.
+- **There is no category management screen, by decision.** Categories cannot be
+  created, edited, or deleted in the app. Existing ones still work in Quick Add.
+  This is intentional; see B-FIX-8a in [REVIEW_STATUS.md](REVIEW_STATUS.md).

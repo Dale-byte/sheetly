@@ -36,13 +36,54 @@ pre-existing React Refresh warnings; seven key `/sheetly/` preview paths return
 
 ## Track B - security and runtime correctness (complete)
 
-| Item                                | Outcome      | Detail                                                                                      |
-| ----------------------------------- | ------------ | ------------------------------------------------------------------------------------------- |
-| B-FIX-1 `postMessage` vulnerability | **Fixed**    | `0705a66`                                                                                   |
-| B-FIX-2 reject empty save payloads  | **Dropped**  | Would break legitimate deletion sync                                                        |
-| B-FIX-3 standalone blank page       | **Fixed**    | `1e1fee2`, tests hardened in `f0a4858`                                                      |
-| B-FIX-8a category management code   | **Retained** | `0999c19` - documented as an unfinished feature, not dead code                              |
-| B-FIX-8b `currencySymbol` escaping  | **Fixed**    | `1ac006b` - `formatCurrency()` escapes the symbol before it reaches an `innerHTML` template |
+| Item                                | Outcome     | Detail                                                                                      |
+| ----------------------------------- | ----------- | ------------------------------------------------------------------------------------------- |
+| B-FIX-1 `postMessage` vulnerability | **Fixed**   | `0705a66`                                                                                   |
+| B-FIX-2 reject empty save payloads  | **Dropped** | Would break legitimate deletion sync                                                        |
+| B-FIX-3 standalone blank page       | **Fixed**   | `1e1fee2`, tests hardened in `f0a4858`                                                      |
+| B-FIX-8a category management code   | **Removed** | Removed at the owner's request - see below                                                  |
+| B-FIX-8b `currencySymbol` escaping  | **Fixed**   | `1ac006b` - `formatCurrency()` escapes the symbol before it reaches an `innerHTML` template |
+
+### B-FIX-8a: category management (closed decision - do not reopen)
+
+This item has now been through three reviews and the outcome is settled. Please
+read this before proposing anything about categories again.
+
+**History.** `addCategoryPrompt`, `confirmAddCategory`, `editCategory`,
+`confirmEditCategory`, and `deleteCategory` were exposed on `window` but not
+wired to any UI, and each called a `renderCategories()` that did not exist.
+Review 1 flagged them as dead code to delete. That was **wrong**: the mutation
+and `saveData()` both complete before the missing renderer throws, so deleting
+them would have removed the only way to add, edit, or remove a category. They
+were retained and documented. Review 2 implemented `renderCategories()` and
+added a **Categories** nav entry. The owner does not want the feature and asked
+for it to be removed again.
+
+**Current state, decided by the owner.** There is no category management UI:
+
+- No **Categories** nav entry and no `category-groups` route.
+- No `renderCategories()` / `refreshCategories()`, and the five mutators are gone.
+- Nothing is exposed on `window` for them.
+
+**The `categories` data itself is retained and is live.** It is read by Quick
+Add (`quickAddFromCategory`), by the item count on the dashboard, and by
+export, backup, and import. The IndexedDB store stays. Existing category records
+keep working exactly as before.
+
+**Therefore, in a future review:**
+
+- Do **not** report the missing Categories screen as a bug or an unfinished
+  feature. It is a deliberate decision, not an oversight.
+- Do **not** delete the `categories` collection, its IndexedDB store, or
+  `quickAddFromCategory`. They are in use, and removing them would break Quick
+  Add.
+- Do **not** re-implement `renderCategories()` or re-add the nav entry without
+  asking the owner first. It has been added and removed once already at their
+  instruction.
+- The one thing still fair to raise: categories can no longer be created,
+  edited, or deleted through the UI. Existing data is safe, but a category can
+  only be changed by editing the stored file directly. Raise it as a question,
+  not a defect.
 
 ### B-FIX-1: message origin validation
 
@@ -83,39 +124,38 @@ referrer metadata.
 
 Covered by `tests/sync-bridge.test.mjs`, mutation-verified in both directions.
 
-### B-FIX-8a: category management (retained, not deleted)
+### B-FIX-8a: category management
 
-Originally flagged for deletion as unreachable code. Verification disproved
-that: the mutators write to `appState` and call `saveData()` **before** calling
-a `renderCategories()` that does not exist, so the data write succeeds and only
-the view refresh fails. `categories` is live data used by Quick Add, item counts,
-and export.
-
-Deleting these would have removed the only way to add, edit, or remove a
-category, so they were retained and documented instead. The correct fix was to
-implement `renderCategories()` and wire it to a nav entry, which is what `1ac006b`
-does: a `category-groups` view, a nav entry, and a refresh after every mutation.
+Superseded by the closed decision above. The original reasoning is kept so the
+correction is not lost: the functions were originally flagged for deletion as
+unreachable code, which verification disproved, because the mutators write to
+`appState` and call `saveData()` **before** calling a `renderCategories()` that
+did not exist, so the data write succeeded and only the view refresh failed. The
+correct fix at the time would have been to implement `renderCategories()`. The
+owner has since decided the feature is not wanted, so it was removed instead.
+See the closed decision above for the current state.
 
 ---
 
 ## Track C - data integrity (complete)
 
-| Issue | Defect                                               | Severity | Commit    |
-| ----- | ---------------------------------------------------- | -------- | --------- |
-| 1     | Import destroyed `tags`, `debts`, `payslips`         | Critical | `1ac006b` |
-| 2     | Load-time dedup deleted duplicate-named items        | Critical | `1ac006b` |
-| 3     | Buffer migration discarded extra `New Buffer` groups | Critical | `1ac006b` |
-| 4     | `settings.schemaVersion` written but never read      | High     | `1ac006b` |
-| 5     | `currencySymbol` inserted unescaped into HTML        | High     | `1ac006b` |
-| 6     | `\|\| 0` hid bad amounts behind wrong totals         | Medium   | `1ac006b` |
-| 7     | IndexedDB had no `debts`/`payslips` stores           | Medium   | `1ac006b` |
-| 8     | Category management unreachable from the UI          | Medium   | `1ac006b` |
+| Issue | Defect                                               | Severity | Commit                                                   |
+| ----- | ---------------------------------------------------- | -------- | -------------------------------------------------------- |
+| 1     | Import destroyed `tags`, `debts`, `payslips`         | Critical | `1ac006b`                                                |
+| 2     | Load-time dedup deleted duplicate-named items        | Critical | `1ac006b`                                                |
+| 3     | Buffer migration discarded extra `New Buffer` groups | Critical | `1ac006b`                                                |
+| 4     | `settings.schemaVersion` written but never read      | High     | `1ac006b`                                                |
+| 5     | `currencySymbol` inserted unescaped into HTML        | High     | `1ac006b`                                                |
+| 6     | `\|\| 0` hid bad amounts behind wrong totals         | Medium   | `1ac006b`                                                |
+| 7     | IndexedDB had no `debts`/`payslips` stores           | Medium   | `1ac006b`                                                |
+| 8     | Category management unreachable from the UI          | Medium   | Removed by owner request - closed decision, see B-FIX-8a |
 
-All eight were found by reading `public/budget/app.js` and fixed in one commit.
-They could not be split into per-issue commits without hand-editing the
+Seven of the eight were found by reading `public/budget/app.js` and fixed in one
+commit. They could not be split into per-issue commits without hand-editing the
 verified diff back apart, which risked reintroducing the very bugs being fixed,
-so the commit message enumerates each defect instead. See
-[KNOWN_ISSUES.md](KNOWN_ISSUES.md) for the full list and the caveats that remain.
+so the commit message enumerates each defect instead. Issue 8 was later reversed
+by owner request; see B-FIX-8a. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for the
+full list and the caveats that remain.
 
 ### Verification performed for Track C
 
@@ -127,8 +167,12 @@ so the commit message enumerates each defect instead. See
   payslip, then loaded and saved. 16/16 assertions passed - both duplicates
   survive, all three groups survive with the first renamed to `Total Buffer` and
   the second kept, debts and payslips are present in localStorage and are
-  written to IndexedDB, the store list is v2, and the Categories view renders and
-  creates a record without throwing.
+  written to IndexedDB, the store list is v2, and the shell→iframe handshake
+  still works end to end.
+- After the category removal, re-verified in a real browser that the **Categories**
+  nav entry and `category-groups` route are gone, that no view throws, that
+  Quick Add still renders a button for an existing category, and that a
+  category still survives save and reload.
 - The same harness produced two initial failures, both of which turned out to be
   faults in the harness rather than the app: the buffer migration renames in
   memory and only persists on the next save, and the new IndexedDB stores start

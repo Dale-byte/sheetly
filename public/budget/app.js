@@ -642,9 +642,8 @@ const renderCurrentView = () => {
     case 'budget-sheet': renderBudgetSheet(); break;
     case 'debts': renderDebts(); break;
     case 'payslip': renderPayslip(); break;
-    case 'categories': renderNotes(); break;
-    case 'category-groups': renderCategories(); break;
-    case 'templates': renderTemplates(); break;
+      case 'categories': renderNotes(); break;
+      case 'templates': renderTemplates(); break;
     case 'settings': renderSettings(); break;
     case 'help': renderHelp(); break;
     default: renderDashboard();
@@ -1797,166 +1796,11 @@ const switchNotesTab = (tab) => {
 
 window.switchNotesTab = switchNotesTab;
 
-// Categories management view.
-//
-// This was referenced by addCategory/editCategory/deleteCategory but never
-// defined, so those functions threw *after* they had already saved. They are
-// only reachable from the console, and calling them must not blank out whichever
-// view is currently open, so refreshCategories() re-renders the current view
-// unless the categories view is the active one.
-const refreshCategories = () => {
-  if (appState.activeView === 'category-groups') {
-    renderCategories();
-  } else {
-    renderCurrentView();
-  }
-};
-
-const renderCategories = () => {
-  const container = document.getElementById('view-container');
-  if (!container) return;
-  
-  const categories = appState.categories || [];
-  const groups = {};
-  categories.forEach(c => {
-    if (!c.groupName) return;
-    if (!groups[c.groupName]) groups[c.groupName] = [];
-    groups[c.groupName].push(c);
-  });
-  const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
-  
-  const topActions = document.getElementById('top-actions');
-  if (topActions) {
-    topActions.innerHTML = `<button class="btn btn-primary" onclick="addCategoryPrompt()">Add Category</button>`;
-  }
-  
-  let html = `<h1>Categories</h1>`;
-  
-  if (categories.length === 0) {
-    html += `<div class="empty-state">
-      <h3>No categories yet</h3>
-      <p>Categories group your budget items for quick entry.</p>
-    </div>`;
-  } else {
-    html += `<div class="card mb-md">
-      <p class="muted">${categories.length} categor${categories.length === 1 ? 'y' : 'ies'} in ${groupNames.length} group${groupNames.length === 1 ? '' : 's'}.</p>
-    </div>`;
-    groupNames.forEach(name => {
-      html += `<div class="card mb-md">
-        <div class="card-header"><h2 class="card-title">${esc(name)}</h2></div>
-        <div class="table-container">
-          <table class="data-table">
-            <thead><tr><th>Name</th><th>Default Amount</th><th>Status</th><th></th></tr></thead>
-            <tbody>`;
-      groups[name].forEach(c => {
-        html += `<tr>
-          <td>${esc(c.name)}</td>
-          <td class="numeric">${formatCurrency(c.defaultAmount)}</td>
-          <td>${c.archived ? '<span class="badge">Archived</span>' : '<span class="badge badge-success">Active</span>'}</td>
-          <td class="numeric">
-            <button class="btn btn-ghost btn-sm" onclick="editCategory('${esc(c.id)}')">Edit</button>
-            <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteCategory('${esc(c.id)}')">Delete</button>
-          </td>
-        </tr>`;
-      });
-      html += `</tbody></table>
-        </div>
-      </div>`;
-    });
-  }
-  
-  container.innerHTML = html;
-};
-
-const addCategoryPrompt = () => {
-  showModal('Add Category', `
-    <div class="form-group">
-      <label class="form-label">Name</label>
-      <input type="text" class="form-input" id="cat-name" placeholder="Category name">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Group</label>
-      <input type="text" class="form-input" id="cat-group" placeholder="e.g., Debit orders">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Default Amount</label>
-      <input type="number" class="form-input currency" id="cat-amount" value="0">
-    </div>
-  `, `<button class="btn btn-secondary" onclick="hideModal()">Cancel</button><button class="btn btn-primary" onclick="confirmAddCategory()">Add</button>`);
-};
-
-const confirmAddCategory = () => {
-  const name = document.getElementById('cat-name').value;
-  const groupName = document.getElementById('cat-group').value;
-  const amount = parseFloat(document.getElementById('cat-amount').value) || 0;
-  
-  if (!name || !groupName) {
-    showToast('Please fill in all fields');
-    return;
-  }
-  
-  const now = new Date().toISOString();
-  const category = {
-    id: generateId(),
-    name,
-    groupName,
-    defaultAmount: amount,
-    defaultBreakdown: '',
-    archived: false,
-    createdAt: now
-  };
-  appState.categories.push(category);
-  saveData();
-  hideModal();
-  refreshCategories();
-  showToast('Category added');
-};
-
-const editCategory = (id) => {
-  const cat = appState.categories.find(c => c.id === id);
-  showModal('Edit Category', `
-    <div class="form-group">
-      <label class="form-label">Name</label>
-      <input type="text" class="form-input" id="cat-name" value="${esc(cat.name)}">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Group</label>
-      <input type="text" class="form-input" id="cat-group" value="${esc(cat.groupName)}">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Default Amount</label>
-      <input type="number" class="form-input currency" id="cat-amount" value="${esc(cat.defaultAmount)}">
-    </div>
-    <div class="form-group">
-      <label class="toggle">
-        <input type="checkbox" id="cat-archived" ${cat.archived ? 'checked' : ''}>
-        <span class="toggle-slider"></span>
-      </label>
-      <span class="ml-sm">Archived</span>
-    </div>
-  `, `<button class="btn btn-secondary" onclick="hideModal()">Cancel</button><button class="btn btn-primary" onclick="confirmEditCategory('${esc(id)}')">Save</button>`);
-};
-
-const confirmEditCategory = (id) => {
-  const cat = appState.categories.find(c => c.id === id);
-  cat.name = document.getElementById('cat-name').value;
-  cat.groupName = document.getElementById('cat-group').value;
-  cat.defaultAmount = parseFloat(document.getElementById('cat-amount').value) || 0;
-  cat.archived = document.getElementById('cat-archived').checked;
-  saveData();
-  hideModal();
-  refreshCategories();
-  showToast('Category saved');
-};
-
-const deleteCategory = (id) => {
-  if (confirm('Delete this category?')) {
-    appState.categories = appState.categories.filter(c => c.id !== id);
-    saveData();
-    refreshCategories();
-    showToast('Category deleted');
-  }
-};
+// Category management is intentionally not implemented. The `categories`
+// collection is still real data used by Quick Add and the item count, but there
+// is no screen to add, edit, or delete a category, and that is deliberate: see
+// REVIEW_STATUS.md (B-FIX-8a). Do not re-add a Categories view or nav entry
+// without asking first.
 
 const renderTemplates = () => {
   const container = document.getElementById('view-container');
@@ -3072,11 +2916,6 @@ window.updateItemBreakdown = updateItemBreakdown;
 window.toggleItemActive = toggleItemActive;
 window.deleteItem = deleteItem;
 window.duplicateSheet = duplicateSheet;
-window.addCategoryPrompt = addCategoryPrompt;
-window.confirmAddCategory = confirmAddCategory;
-window.editCategory = editCategory;
-window.confirmEditCategory = confirmEditCategory;
-window.deleteCategory = deleteCategory;
 window.createTemplatePrompt = createTemplatePrompt;
 window.confirmCreateTemplate = confirmCreateTemplate;
 window.createSheetFromTemplate = createSheetFromTemplate;
