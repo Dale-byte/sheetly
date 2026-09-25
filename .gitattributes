@@ -1,0 +1,33 @@
+# Normalise line endings: store text as LF in the repository and check it out as
+# LF on every platform, including Windows.
+#
+# Without this, a Windows checkout rewrites text files to CRLF. That caused two
+# real problems here:
+#   - `npm run format:check` and `npm run lint` failed, because prettier rejects
+#     the stray CR ("Delete `␍`"), so a correct tree looked broken.
+#   - An edit to public/budget/app.js showed up as a whole-file rewrite
+#     (7000+ changed lines for a 175-line change), burying the real diff.
+#
+# `text=auto` lets git detect binary content and leave it alone; `eol=lf` forces
+# LF on checkout so the working tree matches what is stored. This also overrides
+# any local core.autocrlf setting.
+* text=auto eol=lf
+
+# Binaries are never line-ending translated. `text=auto` already detects these,
+# but naming them keeps a mis-detection from corrupting an asset.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.avif binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.mp3 binary
+*.mp4 binary
