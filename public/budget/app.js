@@ -2932,10 +2932,10 @@ window.importData = importData;
 window.resetAllData = resetAllData;
 window.updateSetting = updateSetting;
 window.openBackupsTab = function() {
-  try { window.parent.postMessage({ source: 'sheetly', type: 'open-backups' }, '*'); } catch (e) {}
+  try { window.parent.postMessage({ source: 'sheetly', type: 'open-backups' }, window.location.origin); } catch (e) {}
 };
 window.openTemplatesTab = function() {
-  try { window.parent.postMessage({ source: 'sheetly', type: 'open-templates' }, '*'); } catch (e) {}
+  try { window.parent.postMessage({ source: 'sheetly', type: 'open-templates' }, window.location.origin); } catch (e) {}
   navigate('templates');
 };
 window.hideModal = hideModal;

@@ -32,7 +32,12 @@
 
   function send(type, payload) {
     try {
-      window.parent.postMessage({ source: 'sheetly', type: type, payload: payload }, '*');
+      // Never '*': that hands the budget snapshot to whatever parent we are
+      // framed by. The host is always same-origin (it serves this file).
+      window.parent.postMessage(
+        { source: 'sheetly', type: type, payload: payload },
+        window.location.origin
+      );
     } catch (e) {}
   }
 
@@ -61,6 +66,11 @@
 
   // Receive snapshot/auth state from parent.
   window.addEventListener('message', function (e) {
+    // Security: only accept messages from our host, same-origin.
+    // `msg.source` below is NOT this check - that string lives inside e.data
+    // and any page can forge it. These two are the real gate.
+    if (e.origin !== window.location.origin) return;
+    if (e.source !== window.parent) return;
     var msg = e.data;
     if (!msg || msg.source !== 'sheetly-host') return;
     if (msg.type === 'init') {
