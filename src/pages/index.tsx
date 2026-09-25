@@ -13,11 +13,11 @@ import {
 import { Backups } from "@/components/Backups";
 import { InstallPrompt } from "@/components/InstallPrompt";
 
-// The budget app stores under the same-origin localStorage keys below. Read as
+// The budget app stores under the same-origin localStorage key below. Read as
 // a fallback so an empty cloud can never wipe a device that has local data.
 function localBudgetData(): string {
   try {
-    return localStorage.getItem("sheetly_data") || localStorage.getItem("budgetbuddy_data") || "";
+    return localStorage.getItem("sheetly_data") || "";
   } catch {
     return "";
   }

@@ -5,19 +5,6 @@ const CONSTANTS = {
   SCHEMA_VERSION: 1
 };
 
-// One-time migration: carry over data saved under the legacy BudgetBuddy key.
-(function () {
-  try {
-    if (localStorage.getItem('sheetly_data') == null) {
-      var legacy = localStorage.getItem('budgetbuddy_data');
-      if (legacy != null) {
-        localStorage.setItem('sheetly_data', legacy);
-        try { localStorage.removeItem('budgetbuddy_data'); } catch (e) {}
-      }
-    }
-  } catch (e) {}
-})();
-
 const generateId = () => {
   try {
     return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).substr(2);
