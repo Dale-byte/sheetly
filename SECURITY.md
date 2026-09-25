@@ -62,5 +62,7 @@ If a token is ever committed or pasted somewhere public:
 2. Generate a replacement with the same minimal scope.
 3. Re-enter it in each device's Connect screen.
 
-Secret scanning and push protection are enabled on this repo, so an accidental
-credential push should be blocked and flagged rather than merged.
+Secret scanning and push protection are worth enabling on this repo (Settings →
+Code security and analysis) so an accidental credential push is blocked and
+flagged rather than merged. If you enable them, a push that trips them fails,
+so a token never has to be cleaned up after the fact.
