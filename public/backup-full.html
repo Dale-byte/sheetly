@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Sheetly — Full Local Backup</title>
+    <style>
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        max-width: 900px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+        background: #111;
+        color: #e6e6e6;
+      }
+      h1 {
+        font-size: 1.3rem;
+      }
+      button {
+        font: inherit;
+        padding: 0.6rem 1rem;
+        margin: 0.3rem 0.4rem 0.3rem 0;
+        cursor: pointer;
+        background: #2a6;
+        color: #000;
+        border: 0;
+        border-radius: 4px;
+      }
+      button.warn {
+        background: #c40;
+        color: #fff;
+      }
+      pre {
+        background: #1c1c1c;
+        padding: 1rem;
+        overflow: auto;
+        max-height: 60vh;
+        border: 1px solid #333;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .warnbox {
+        border: 2px solid #c40;
+        padding: 0.8rem;
+        margin: 1rem 0;
+        background: #2a1414;
+      }
+      .ok {
+        color: #6c6;
+      }
+      table {
+        border-collapse: collapse;
+      }
+      td {
+        padding: 0.15rem 0.7rem 0.15rem 0;
+        vertical-align: top;
+      }
+      .muted {
+        color: #999;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Sheetly — Full Local Backup</h1>
+
+    <p>
+      This page <strong>only reads</strong> your data. It never writes, migrates, or
+      deletes anything. Open it on the device whose data you want to copy.
+    </p>
+
+    <div class="warnbox">
+      <strong>Why this exists.</strong> The app's own <em>Export</em> and
+      <em>Backup</em> buttons leave out <code>debts</code> and
+      <code>payslips</code>, and <em>Import</em> silently drops
+      <code>tags</code>, <code>debts</code> and <code>payslips</code> entirely.
+      Those buttons are not a safe backup. This one reads the full local state
+      instead, and also flags the two cases where the app deletes data on its own.
+    </div>
+
+    <p>
+      <button id="scan">1. Scan &amp; check</button>
+      <button id="full" class="warn">2. Download FULL backup</button>
+      <button id="raw">3. Download raw localStorage</button>
+    </p>
+
+    <p class="muted">
+      Do step 2 at minimum. Step 3 is a byte-exact copy of the stored key and is
+      the most faithful restore source. Keep all files until you have confirmed
+      your data is intact.
+    </p>
+
+    <pre id="out">Press "Scan &amp; check" to begin.</pre>
+
+    <script>
+      // Mirrors the exact key list written by saveToLocalStorage() in app.js:203.
+      var STORAGE_KEY = "sheetly_data";
+
+      function readRaw() {
+        var raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        try {
+          return { raw: raw, parsed: JSON.parse(raw) };
+        } catch (e) {
+          return { raw: raw, parsed: null, parseError: String(e) };
+        }
+      }
+
+      // Reproduce the destructive read-path behaviour so the report shows what
+      // WOULD be pruned, without actually doing it. app.js:248-261 and :235-244.
+      function analyse(data) {
+        var report = { counts: {}, hazards: [] };
+
+        var listKeys = [
+          "sheets",
+          "groups",
+          "items",
+          "recurringItems",
+          "categories",
+          "templates",
+          "tags",
+          "debts",
+          "payslips",
+        ];
+        listKeys.forEach(function (k) {
+          report.counts[k] = Array.isArray(data[k]) ? data[k].length : null;
+        });
+        // settings is an object, not a list: report presence, not a count.
+        report.counts["settings"] =
+          data.settings && typeof data.settings === "object" ? "present (" + Object.keys(data.settings).length + " fields)" : null;
+        report.counts.currentSheetId = data.currentSheetId || null;
+
+        // Hazard 1: load-time dedup on groupId + '|' + name (app.js:248-261).
+        var items = Array.isArray(data.items) ? data.items : [];
+        var seen = {};
+        var wouldPrune = [];
+        items.forEach(function (it) {
+          var key = it.groupId + "|" + it.name;
+          if (seen[key]) {
+            wouldPrune.push({ key: key, kept: seen[key], pruned: it });
+          } else {
+            seen[key] = it.name;
+          }
+        });
+        report.dedup = { kept: Object.keys(seen).length, wouldPruneCount: wouldPrune.length, wouldPrune: wouldPrune };
+
+        // Hazard 2: 'New Buffer' migration renames first, drops the rest (app.js:235-244).
+        var groups = Array.isArray(data.groups) ? data.groups : [];
+        var bufferLike = groups.filter(function (g) {
+          return g.name === "New Buffer" || g.name === "Total (Buffer/Variable)";
+        });
+        var alreadyTotal = groups.some(function (g) {
+          return g.name === "Total Buffer";
+        });
+        report.newBuffer = {
+          matches: bufferLike.map(function (g) {
+            return g.name;
+          }),
+          alreadyHasTotalBuffer: alreadyTotal,
+          wouldDrop: bufferLike.length > (alreadyTotal ? 0 : 1) ? bufferLike.length - (alreadyTotal ? 0 : 1) : 0,
+        };
+
+        // Hazard 3: non-numeric amounts that '|| 0' would let through (issue 6).
+        var badAmounts = [];
+        items.forEach(function (it) {
+          var v = it.amountTotal;
+          if (typeof v === "number") return;
+          if (typeof v === "string" && v.trim() !== "" && isNaN(Number(v))) {
+            badAmounts.push({ name: it.name, amountTotal: v });
+          }
+        });
+        report.badAmounts = { count: badAmounts.length, sample: badAmounts.slice(0, 20) };
+
+        return report;
+      }
+
+      function fmt(n) {
+        if (n === null) return "MISSING";
+        return String(n);
+      }
+
+      function renderScan(r) {
+        var lines = [];
+        lines.push("=== RECORD COUNTS (from localStorage '" + STORAGE_KEY + "') ===");
+        Object.keys(r.counts).forEach(function (k) {
+          lines.push("  " + k.padEnd(18) + " " + fmt(r.counts[k]));
+        });
+
+        lines.push("");
+        lines.push("=== HAZARD CHECK: data the app would delete on its own ===");
+
+        lines.push("");
+        lines.push("[1] Duplicate groupId+name items (app.js:248-261)");
+        if (r.dedup.wouldPruneCount === 0) {
+          lines.push("    OK - nothing would be pruned.");
+        } else {
+          lines.push("    WARNING: " + r.dedup.wouldPruneCount + " item(s) would be silently deleted on next load.");
+          r.dedup.wouldPrune.forEach(function (p) {
+            lines.push("      would PRUNE: " + p.pruned.name + "  (id=" + p.pruned.id + ")");
+          });
+        }
+
+        lines.push("");
+        lines.push("[2] 'New Buffer' / 'Total (Buffer/Variable)' groups (app.js:235-244)");
+        if (r.newBuffer.matches.length === 0) {
+          lines.push("    OK - no matching groups.");
+        } else {
+          lines.push("    found " + r.newBuffer.matches.length + ": " + JSON.stringify(r.newBuffer.matches));
+          if (r.newBuffer.wouldDrop > 0) {
+            lines.push("    WARNING: " + r.newBuffer.wouldDrop + " group(s) would be silently deleted on load.");
+          } else {
+            lines.push("    OK - only the first would be renamed, none dropped.");
+          }
+        }
+
+        lines.push("");
+        lines.push("[3] Non-numeric amounts (issue 6)");
+        if (r.badAmounts.count === 0) {
+          lines.push("    OK - all item amounts are numeric.");
+        } else {
+          lines.push("    WARNING: " + r.badAmounts.count + " non-numeric amount(s) can corrupt totals.");
+          r.badAmounts.sample.forEach(function (b) {
+            lines.push("      " + b.name + " = " + JSON.stringify(b.amountTotal));
+          });
+        }
+
+        lines.push("");
+        lines.push("Note: keys shown as MISSING are absent from localStorage.");
+        lines.push("Per issue 1, Export/Backup/Import would silently lose tags, debts and payslips.");
+        return lines.join("\n");
+      }
+
+      function download(name, text) {
+        var blob = new Blob([text], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function stamp() {
+        var d = new Date();
+        var p = function (n) {
+          return String(n).padStart(2, "0");
+        };
+        return (
+          d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds())
+        );
+      }
+
+      var last = null;
+
+      document.getElementById("scan").onclick = function () {
+        var r = readRaw();
+        var out = document.getElementById("out");
+        if (!r) {
+          out.textContent =
+            "No data found under localStorage['" + STORAGE_KEY + "'].\n\n" +
+            "This usually means either:\n" +
+            "  - you are on a device that has never connected, or\n" +
+            "  - you are on the app origin but a different browser profile, or\n" +
+            "  - the app is not open / already reset.\n\n" +
+            "Open the Sheetly app on this device first, then run this page again.";
+          return;
+        }
+        if (!r.parsed) {
+          out.textContent = "Data exists but will not parse as JSON: " + r.parseError + "\n\nUse the raw download instead.";
+          return;
+        }
+        last = r.parsed;
+        out.textContent = renderScan(analyse(r.parsed));
+      };
+
+      document.getElementById("full").onclick = function () {
+        var r = readRaw();
+        if (!r) {
+          alert("No data found.");
+          return;
+        }
+        var payload = r.parsed
+          ? {
+              _readme:
+                "Sheetly full local backup. Read-only capture of localStorage['" + STORAGE_KEY +
+                "'], taken " + new Date().toISOString() + ". " +
+                "Contains tags/debts/payslips, which the app's own Export omits. " +
+                "Restore by writing this object's keys back into localStorage['" + STORAGE_KEY + "'].",
+              _exportedAt: new Date().toISOString(),
+              _source: "localStorage:" + STORAGE_KEY,
+              data: r.parsed,
+              hazards: analyse(r.parsed),
+            }
+          : { _error: "unparseable", raw: r.raw };
+        download("sheetly-FULL-backup-" + stamp() + ".json", JSON.stringify(payload, null, 2));
+        document.getElementById("out").textContent =
+          "Downloaded sheetly-FULL-backup-" + stamp() + ".json\n\nStore it somewhere outside this machine as well.";
+      };
+
+      document.getElementById("raw").onclick = function () {
+        var r = readRaw();
+        if (!r) {
+          alert("No data found.");
+          return;
+        }
+        download("sheetly-RAW-" + stamp() + ".json", r.raw);
+        document.getElementById("out").textContent = "Downloaded the raw stored value.\n\nThis is the most faithful copy for restoring.";
+      };
+    </script>
+  </body>
+</html>
