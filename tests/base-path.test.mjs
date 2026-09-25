@@ -19,9 +19,9 @@ test("vite base matches the expected Pages subpath", () => {
   assert.equal(base[1], EXPECTED);
 });
 
-test("postbuild BASE matches the vite base, minus the trailing slash", () => {
-  const base = /const BASE = "([^"]+)"/.exec(read("scripts/postbuild.mjs"));
-  assert.ok(base, "could not find `const BASE` in scripts/postbuild.mjs");
+test("post-build BASE matches the vite base, minus the trailing slash", () => {
+  const base = /const BASE = "([^"]+)"/.exec(read("scripts/post-build.mjs"));
+  assert.ok(base, "could not find `const BASE` in scripts/post-build.mjs");
   assert.equal(base[1], EXPECTED.replace(/\/$/, ""));
 });
 

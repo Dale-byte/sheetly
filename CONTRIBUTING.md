@@ -19,7 +19,7 @@ stored only in your browser.
 | Command                | What it does                                      |
 | ---------------------- | ------------------------------------------------- |
 | `npm run dev`          | Dev server with HMR                               |
-| `npm run build`        | Production build + `scripts/postbuild.mjs`        |
+| `npm run build`        | Production build + `scripts/post-build.mjs`       |
 | `npm run preview`      | Serve the built output from `dist/`               |
 | `npm run lint`         | ESLint                                            |
 | `npm run typecheck`    | `tsc --noEmit`                                    |
@@ -92,19 +92,19 @@ is hard-coded in **four** places that must stay in sync:
 - `vite.config.ts` (`base`)
 - `index.html` (manifest, favicon, apple-touch-icon hrefs)
 - `public/manifest.webmanifest` (`id`, `start_url`, `scope`, icon `src`)
-- `scripts/postbuild.mjs` (`BASE`, used to build the service worker precache)
+- `scripts/post-build.mjs` (`BASE`, used to build the service worker precache)
 
 If you ever change one, change all four, or the app silently 404s on its
 icons and service worker.
 
 ## Service worker
 
-`public/sw.js` is a **template**, not the shipped file. `scripts/postbuild.mjs`
+`public/sw.js` is a **template**, not the shipped file. `scripts/post-build.mjs`
 rewrites its `VERSION` and `PRECACHE` list at build time from the real asset
 hashes. Two consequences:
 
 - Do not hand-edit the `VERSION` or `PRECACHE` constants; they are overwritten.
-- Do not let Prettier reformat that file. The postbuild step matches those two
+- Do not let Prettier reformat that file. The post-build step matches those two
   constants with exact regexes and will fail the build loudly if the shape
   changes.
 

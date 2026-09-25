@@ -5,5 +5,5 @@ package-lock.json
 # public/ is the legacy vanilla-JS budget app. It ships untranspiled and is
 # excluded from ESLint too. Reformatting it would bury every real change in
 # thousands of lines of noise, and public/sw.js is regex-matched by
-# scripts/postbuild.mjs - reformatting it can break the build.
+# scripts/post-build.mjs - reformatting it can break the build.
 public

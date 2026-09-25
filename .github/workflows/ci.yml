@@ -56,9 +56,9 @@ jobs:
           test -f dist/manifest.webmanifest
           test -f dist/icons/icon-192.png
           # The service worker must have been stamped, not left as the
-          # un-stamped template. postbuild.mjs replaces this exact literal.
+          # un-stamped template. post-build.mjs replaces this exact literal.
           grep -q 'const VERSION = "v1";' dist/sw.js \
-            && { echo "::error::dist/sw.js was not stamped by postbuild"; exit 1; }
+            && { echo "::error::dist/sw.js was not stamped by post-build"; exit 1; }
           # 404.html must be a byte-for-byte copy of index.html.
           cmp -s dist/index.html dist/404.html \
             || { echo "::error::dist/404.html differs from dist/index.html"; exit 1; }
