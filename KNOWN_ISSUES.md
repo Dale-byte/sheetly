@@ -142,9 +142,15 @@ your categories while appearing to fail, and the screen will look unchanged.
 
 Note that `categories` themselves are healthy and actively used — by Quick Add
 (`:1365`, `:1394`), item counts (`:2214`), and export/backup (`:2697`, `:2726`).
-Only the management UI is missing. This is a missing renderer, not dead code, so
-the functions are intentionally left in place: removing them would delete the
-only way to add, edit, or remove a category.
+Only the management UI is missing.
+
+**Decision: these functions are deliberately retained.** They were originally
+flagged for deletion as dead code, but that was wrong — the mutation and
+`saveData()` both complete before the missing renderer throws. Deleting them
+would remove the only way to add, edit, or remove a category. Treat this as
+resolved: do not delete them. If the feature is ever wanted, the correct fix is
+to implement `renderCategories()` and wire it to a nav entry, not to remove the
+mutators.
 
 ---
 
