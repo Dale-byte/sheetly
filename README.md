@@ -46,6 +46,7 @@ Notes:
 - Your budget and your token live only in your **private** data repo and in this browser's localStorage.
 - Secret scanning and push protection are worth enabling on the app repo (Settings → Code security and analysis), so an accidental credential push is blocked and flagged instead of merged.
 - Before using the legacy budget app, please read **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)**. It documents confirmed, currently unfixed defects in how data is imported, exported, and migrated — including one that can permanently destroy data.
+- **[REVIEW_STATUS.md](REVIEW_STATUS.md)** records the outcome of the repository review, including corrections to findings that did not survive verification.
 
 ## Features
 
@@ -62,7 +63,7 @@ Notes:
 ## Architecture
 
 - **Shell** - a Vite + React 19 app that handles the connect screen, top-bar tabs, sync engine, and the Backups UI.
-- **Budget app** - the original HTML/CSS/JS budget app in `public/budget/`, loaded inside a full-screen iframe. `index.html`, `styles.css`, `sync.js` and `calculator.js` are untouched; `app.js` is only edited deliberately and kept free of framework assumptions. `sync.js` and `calculator.js` are Sheetly additions.
+- **Budget app** - the original HTML/CSS/JS budget app in `public/budget/`, loaded inside a full-screen iframe. `styles.css` and `calculator.js` are untouched. `app.js` is only edited deliberately and kept free of framework assumptions, and its data-loading and import behaviour has known defects - see [KNOWN_ISSUES.md](KNOWN_ISSUES.md). `index.html` and `sync.js` are Sheetly additions.
 - **Sync** - `src/lib/github-store.ts` reads/writes `budget.json` in the connected private repo via the GitHub contents API; the shell polls for changes and reloads the iframe. A 20-second suppression after a local write avoids reloading while you type. Cloud data is authoritative when present; when the repo is empty, this device's local data is kept and uploaded instead of being overwritten.
 - **PWA** - `public/manifest.webmanifest` and a service worker. At build time the worker is regenerated (`scripts/post-build.mjs`) so its precache list matches the real asset hashes and its version is stamped with the commit SHA, so clients always pick up a fresh worker after each deploy.
 - **Deploy** - GitHub Actions (`.github/workflows/deploy.yml`) builds the app and publishes it to GitHub Pages on every push to `main`. Deep links fall back to `404.html` (the SPA shell).

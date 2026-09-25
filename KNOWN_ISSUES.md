@@ -12,6 +12,9 @@ migration strategy and a verified backup of your real data first.
 **Severity** is ranked by risk of irreversible data loss, not by how annoying
 they are.
 
+For the outcome of the review that produced this list — including which findings
+were corrected or dropped — see [REVIEW_STATUS.md](REVIEW_STATUS.md).
+
 ---
 
 ## Critical

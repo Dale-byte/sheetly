@@ -21,6 +21,29 @@ your browser  <--localStorage-->  iframe (public/budget/)
 Because there is no server, Sheetly has no stored credentials of its own. The
 trust boundary is your browser and your GitHub account.
 
+## Protecting the iframe
+
+The budget app runs inside a full-screen iframe owned by the shell app, and the
+two exchange data with `postMessage`. Because the app has no server, the iframe's
+own security depends entirely on that message boundary.
+
+Both directions validate the sender:
+
+- the budget app accepts messages **only** from its real parent, checking both
+  the origin and that `event.source` is the parent window;
+- the shell accepts messages **only** from the actual iframe window, on the same
+  origin.
+
+Every outbound message targets the current origin explicitly - there is no
+wildcard `"*"` target anywhere. Without these checks, any page able to obtain a
+reference to the iframe could drive the sync engine or read budget data out of
+it.
+
+Each page also carries a framebusting script: the shell refuses to be framed at
+all, and the budget app refuses to be framed **cross-origin** while still
+allowing the same-origin shell to embed it. This is a best-effort client-side
+measure, not a substitute for the message validation above.
+
 ## What is and is not a secret
 
 | Item              | Where it lives                                                             | Notes                                                                            |
